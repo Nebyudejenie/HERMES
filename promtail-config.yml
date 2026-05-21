@@ -1,0 +1,222 @@
+# Promtail configuration for Hermis Agent - Log shipping
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # System logs
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: system
+          __path__: /var/log/{syslog,messages}
+    pipeline_stages:
+      - multiline:
+          line_start_pattern: '^\w{3}\s+\d{1,2}\s\d{2}:\d{2}:\d{2}'
+      - regex:
+          expression: '^(?P<timestamp>\w{3}\s+\d{1,2}\s\d{2}:\d{2}:\d{2})\s(?P<hostname>\w+)\s(?P<application>[^\[]+)(?:\[(?P<pid>\d+)\])?\s(?P<message>.*)$'
+      - timestamp:
+          source: timestamp
+          format: 'Jan 2 15:04:05'
+      - labels:
+          hostname:
+          application:
+          pid:
+
+  # Kernel messages
+  - job_name: kernel
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: kernel
+          __path__: /var/log/kern.log
+    pipeline_stages:
+      - multiline:
+          line_start_pattern: '^\[.*\]'
+      - regex:
+          expression: '^\[(?P<timestamp>[^\]]+)\]\s(?P<message>.*)$'
+      - timestamp:
+          source: timestamp
+          format: 'Jan 2 15:04:05'
+
+  # Auth logs
+  - job_name: auth
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: auth
+          __path__: /var/log/auth.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\w{3}\s+\d{1,2}\s\d{2}:\d{2}:\d{2})\s(?P<hostname>\w+)\s(?P<process>[^\[]+)\[(?P<pid>\d+)\]:\s(?P<message>.*)$'
+      - timestamp:
+          source: timestamp
+          format: 'Jan 2 15:04:05'
+      - labels:
+          hostname:
+          process:
+          pid:
+
+  # Docker logs
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*log.json
+    json:
+      format: json
+      time_key: time
+      time_format: '2006-01-02T15:04:05.999999999Z07:00'
+      time_parse_from_attributes: true
+    pipeline_stages:
+      - parse:
+          timestamp:
+            source: time
+            format: 'RFC3339'
+      - extract:
+          timestamp: '{{ .time }}'
+          log: '{{ .log }}'
+          stream: '{{ .stream }}'
+      - regex:
+          expression: '(?P<log_line>.+)'
+      - labels:
+          stream:
+
+  # Application logs - Hermis
+  - job_name: hermis
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: hermis
+          __path__: /opt/hermis/logs/*.log
+    pipeline_stages:
+      - multiline:
+          line_start_pattern: '^\[.*\]'
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+      - timestamp:
+          source: timestamp
+          format: 'RFC3339Nano'
+      - labels:
+          level:
+      - drop:
+          source: level
+          regex: 'debug|trace'
+
+  # Ollama logs
+  - job_name: ollama
+    docker:
+      host: unix:///var/run/docker.sock
+      labels:
+        container_name: ollama
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+      - timestamp:
+          source: timestamp
+          format: 'RFC3339Nano'
+      - labels:
+          level:
+
+  # PostgreSQL logs
+  - job_name: postgres
+    docker:
+      host: unix:///var/run/docker.sock
+      labels:
+        container_name: postgres
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+    pipeline_stages:
+      - regex:
+          expression: '(?P<timestamp>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})\s\[(?P<pid>\d+)\]\s(?P<level>\w+):\s(?P<message>.+)'
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05'
+      - labels:
+          level:
+          pid:
+
+  # Redis logs
+  - job_name: redis
+    docker:
+      host: unix:///var/run/docker.sock
+      labels:
+        container_name: redis
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+    pipeline_stages:
+      - regex:
+          expression: '(?P<timestamp>\d+:\d+:\d+\.\d+)\s[*#-]\s(?P<message>.+)'
+      - timestamp:
+          source: timestamp
+          format: '15:04:05.999999'
+
+  # Keycloak logs
+  - job_name: keycloak
+    docker:
+      host: unix:///var/run/docker.sock
+      labels:
+        container_name: keycloak
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            logger: logger
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02T15:04:05.999Z'
+      - labels:
+          level:
+          logger:
+
+  # Vault logs
+  - job_name: vault
+    docker:
+      host: unix:///var/run/docker.sock
+      labels:
+        container_name: vault
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+    pipeline_stages:
+      - regex:
+          expression: '(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d+Z)\s\[(?P<level>\w+)\]\s(?P<message>.+)'
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02T15:04:05.999999Z'
+      - labels:
+          level:
+
+limit_config:
+  max_lines: 10000
+  max_entries: 100000

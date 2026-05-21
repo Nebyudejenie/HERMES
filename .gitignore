@@ -1,0 +1,70 @@
+# Environment and Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Data and Logs (DO NOT COMMIT)
+/opt/hermis/data/
+/opt/hermis/logs/
+/opt/hermis/backups/
+/opt/hermis/.env
+data/
+logs/
+backups/
+
+# Models (Too large, download separately)
+/models/
+/ollama/
+*.model
+*.bin
+
+# Runtime and Cache
+.cache/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Node modules (if applicable)
+node_modules/
+npm-debug.log
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Private/local configs
+local.yml
+private/
+secrets/

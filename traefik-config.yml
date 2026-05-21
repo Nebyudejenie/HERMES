@@ -1,0 +1,94 @@
+api:
+  insecure: true
+  dashboard: true
+  entryPoint: traefik
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entrypoint:
+          scheme: https
+          permanent: false
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "admin@hermis.local"
+      storage: "/traefik/acme.json"
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  docker:
+    exposedByDefault: false
+    endpoint: "unix:///var/run/docker.sock"
+    network: hermis-internal
+    swarmMode: false
+    useBindPortIP: false
+  file:
+    filename: "/traefik/dynamic.yml"
+    watch: true
+
+accessLog:
+  filePath: "/traefik/access.log"
+  format: json
+
+log:
+  filePath: "/traefik/traefik.log"
+  level: INFO
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
+entryPoints:
+  metrics:
+    address: "127.0.0.1:8082"
+
+# Global configuration
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+# Security headers middleware
+http:
+  middlewares:
+    security-headers:
+      headers:
+        customrequestheaders:
+          X-Frame-Options: "DENY"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Referrer-Policy: "strict-origin-when-cross-origin"
+          Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 200
+    compress:
+      compress: {}
+    cors:
+      corsClassicMiddleware:
+        allowedOrigins:
+          - "*"
+        allowedMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        allowedHeaders:
+          - "*"
+        exposedHeaders:
+          - "*"
+        maxAge: 3600
+        allowCredentials: true
