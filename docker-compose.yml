@@ -178,6 +178,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gateway
+      # WSL fix: build over host network so pip can resolve DNS
+      # (default bridge network can't reach the WSL NAT resolver)
+      network: host
     image: hermis/ai-gateway:latest
     container_name: ai-gateway
     restart: unless-stopped
