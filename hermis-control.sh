@@ -84,6 +84,16 @@ cmd_up() {
         systemctl start docker
         sleep 2
     fi
+
+    # WSL fix: ensure Docker daemon has working DNS (containers can't reach
+    # the WSL NAT resolver, which breaks image pulls and builds)
+    if ! grep -q '"dns"' /etc/docker/daemon.json 2>/dev/null; then
+        echo -e "${YELLOW}    Configuring Docker DNS (WSL fix)...${NC}"
+        mkdir -p /etc/docker
+        echo '{"dns": ["8.8.8.8", "1.1.1.1"]}' > /etc/docker/daemon.json
+        systemctl restart docker
+        sleep 3
+    fi
     echo -e "${GREEN}✓ Docker ready${NC}"
     echo ""
 

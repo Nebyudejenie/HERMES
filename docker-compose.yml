@@ -173,6 +173,40 @@ services:
       timeout: 5s
       retries: 3
 
+  # Hermis AI Gateway - OpenAI-compatible API with RAG
+  ai-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    image: hermis/ai-gateway:latest
+    container_name: ai-gateway
+    restart: unless-stopped
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      QDRANT_BASE_URL: http://qdrant:6333
+      LOG_LEVEL: "${GATEWAY_LOG_LEVEL:-INFO}"
+      ENABLE_RAG: "${GATEWAY_ENABLE_RAG:-true}"
+      ENABLE_METRICS: "true"
+      RATE_LIMIT: "${GATEWAY_RATE_LIMIT:-100}"
+      REQUEST_TIMEOUT: "${GATEWAY_REQUEST_TIMEOUT:-300}"
+    ports:
+      - "5000:8000"
+    networks:
+      - hermis-ai
+      - hermis-internal
+    depends_on:
+      - ollama
+      - qdrant
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gateway.rule=Host(`api.localhost`)"
+      - "traefik.http.services.gateway.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   # Qdrant - Vector Database for RAG
   qdrant:
     image: qdrant/qdrant:latest
