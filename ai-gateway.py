@@ -103,14 +103,15 @@ class ModelRegistry:
             "latency_ms": []
         }
 
-    async def discover_models(self):
-        """Discover available models from Ollama"""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{OLLAMA_BASE_URL}/api/tags",
-                    timeout=REQUEST_TIMEOUT
-                )
+    async def discover_models(self, retries: int = 3):
+        """Discover available models from Ollama (with retries)"""
+        for attempt in range(1, retries + 1):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{OLLAMA_BASE_URL}/api/tags",
+                        timeout=15
+                    )
                 if response.status_code == 200:
                     data = response.json()
                     for model in data.get("models", []):
@@ -122,10 +123,18 @@ class ModelRegistry:
                             metadata=model
                         )
                     logger.info(f"Discovered {len(self.models)} models")
-                else:
-                    logger.error(f"Failed to discover models: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Error discovering models: {e}")
+                    return True
+                logger.error(f"Failed to discover models: {response.status_code}")
+            except Exception as e:
+                logger.error(f"Error discovering models (attempt {attempt}/{retries}): {e}")
+                if attempt < retries:
+                    await asyncio.sleep(2)
+        return False
+
+    async def ensure_models(self):
+        """Lazily discover models if the registry is empty (self-healing)."""
+        if not self.models:
+            await self.discover_models()
 
     def register_model(self, model_id: str, model_type: str,
                       context_window: int, parameters: int, metadata: Dict = None):
@@ -163,6 +172,7 @@ async def startup():
 @app.get("/v1/models")
 async def list_models():
     """List available models"""
+    await registry.ensure_models()
     return {
         "object": "list",
         "data": [
@@ -200,7 +210,8 @@ async def get_model(model_id: str):
 async def chat_completion(request: ChatRequest):
     """OpenAI-compatible chat completion endpoint"""
     try:
-        # Validate model exists
+        # Validate model exists (lazily discover if registry is empty)
+        await registry.ensure_models()
         model = registry.get_model(request.model)
         if not model:
             raise HTTPException(status_code=404, detail=f"Model {request.model} not found")
@@ -273,6 +284,8 @@ async def chat_completion(request: ChatRequest):
                     }
                 }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat completion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -281,7 +294,8 @@ async def chat_completion(request: ChatRequest):
 async def create_embedding(request: EmbeddingRequest):
     """Create embeddings"""
     try:
-        # Validate model
+        # Validate model (lazily discover if registry is empty)
+        await registry.ensure_models()
         model = registry.get_model(request.model)
         if not model:
             raise HTTPException(status_code=404, detail=f"Model {request.model} not found")
@@ -318,6 +332,8 @@ async def create_embedding(request: EmbeddingRequest):
             }
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Embedding error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
