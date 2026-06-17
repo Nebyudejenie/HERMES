@@ -119,8 +119,11 @@ check_prerequisites() {
 
     log_progress "Checking available disk space..."
     local available_disk=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-    if [ "${available_disk}" -lt 80 ]; then
-        log_error "Only ${available_disk}GB disk available. Minimum required: 80GB"
+    # Allow override for tight environments: HERMIS_MIN_DISK=NN bash hermis-agent-installer.sh
+    local min_disk="${HERMIS_MIN_DISK:-25}"
+    if [ "${available_disk}" -lt "${min_disk}" ]; then
+        log_error "Only ${available_disk}GB disk available. Minimum required: ${min_disk}GB"
+        log_info "Free up space, grow the disk, or lower the bar: HERMIS_MIN_DISK=20 bash hermis-agent-installer.sh"
         exit 1
     elif [ "${available_disk}" -lt 200 ]; then
         log_warning "Only ${available_disk}GB disk available. Recommended: 400GB+"
