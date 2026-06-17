@@ -579,77 +579,71 @@ create_directory_structure() {
 ###############################################################################
 
 install_ollama() {
-    log_section "OLLAMA INSTALLATION"
+    log_section "OLLAMA SETUP"
 
-    # Check if Ollama is already installed
-    if command -v ollama &> /dev/null; then
-        log_success "Ollama already installed"
-        ollama --version
-
-        # Check if Ollama service is running
-        if systemctl is-active ollama > /dev/null 2>&1; then
-            log_success "Ollama service is running"
-        else
-            log_progress "Starting Ollama service..."
-            systemctl start ollama 2>/dev/null || {
-                log_warning "Could not start Ollama service (may already be running or in container)"
-            }
-            sleep 2
-        fi
-
-        # Check if models are already present
-        log_progress "Checking for existing models..."
-        local existing_models=$(ollama list 2>/dev/null | wc -l)
-        if [ "$existing_models" -gt 1 ]; then
-            log_success "Models already present ($existing_models found)"
-            ollama list
-            log_info "Skipping model pull (use 'ollama pull <model>' to add more)"
-            return 0
-        fi
+    # The stack runs Ollama as a container (service name "ollama", port 11434).
+    # A host-level Ollama service would hold 11434 and collide with the
+    # container -> "port is already allocated". Free the port here.
+    if systemctl is-active ollama > /dev/null 2>&1; then
+        log_warning "A host Ollama service is running and holding port 11434"
+        log_progress "Stopping & disabling host Ollama (the stack runs it as a container)..."
+        systemctl stop ollama 2>/dev/null || true
+        systemctl disable ollama 2>/dev/null || true
+        sleep 2
+    fi
+    # Also free the port if anything non-systemd is bound to it
+    if ss -ltn 2>/dev/null | grep -q ':11434 '; then
+        log_warning "Port 11434 still in use; attempting to free it"
+        fuser -k 11434/tcp 2>/dev/null || true
+        sleep 1
     fi
 
-    log_progress "Downloading Ollama installer..."
-    curl -fsSL https://ollama.ai/install.sh | sh || {
-        log_warning "Ollama download failed - may already be installed"
-    }
-
-    log_progress "Starting Ollama service..."
-    systemctl start ollama 2>/dev/null || {
-        log_warning "Ollama service start failed - may already be running"
-    }
-    systemctl enable ollama 2>/dev/null || true
-
-    log_progress "Waiting for Ollama to initialize..."
-    sleep 5
-
-    log_progress "Pulling models based on available storage..."
-
-    # Select models based on disk space
-    local models_to_pull
+    # Decide which models the Ollama CONTAINER should pull after it starts.
+    # Consumed by pull_models_into_container() in start_services.
     if [ "${MINIMAL_INSTALL:-false}" = "true" ]; then
-        log_info "Minimal install: pulling small models only"
-        models_to_pull=("mistral:7b" "nomic-embed-text")
+        export HERMIS_MODELS="mistral:7b nomic-embed-text"
+        log_info "Minimal model set selected (~5 GB): ${HERMIS_MODELS}"
     elif [ "${COMPACT_INSTALL:-false}" = "true" ]; then
-        log_info "Compact install: pulling limited model set"
-        models_to_pull=("mistral:7b" "neural-chat" "nomic-embed-text")
+        export HERMIS_MODELS="mistral:7b neural-chat nomic-embed-text"
+        log_info "Compact model set selected (~10-15 GB): ${HERMIS_MODELS}"
     else
-        log_info "Full install: pulling all recommended models"
-        models_to_pull=("llama2" "mistral:7b" "neural-chat" "phi" "codellama" "nomic-embed-text")
+        export HERMIS_MODELS="llama3 mistral:7b codellama nomic-embed-text"
+        log_info "Full model set selected (~25-30 GB): ${HERMIS_MODELS}"
     fi
 
-    # Pull selected models in background
-    for model in "${models_to_pull[@]}"; do
-        # Check if model already exists
-        if ollama list 2>/dev/null | grep -q "$model"; then
-            log_success "Model $model already present"
-        else
-            log_progress "Pulling $model (this may take a while)..."
-            ollama pull "$model" &
+    log_success "Ollama will run as a container; models pull after startup"
+}
+
+# Pull the selected models into the running Ollama container
+pull_models_into_container() {
+    local models="${HERMIS_MODELS:-mistral:7b nomic-embed-text}"
+
+    log_progress "Waiting for Ollama container to be ready..."
+    local ready=false
+    for _ in $(seq 1 30); do
+        if docker exec ollama ollama list > /dev/null 2>&1; then
+            ready=true
+            break
         fi
+        sleep 2
     done
 
-    log_success "Ollama ready - models pulling in background"
-    log_info "Minimal models: ~3-4 GB | Compact: ~10-15 GB | Full: ~30-40 GB"
+    if [ "$ready" != true ]; then
+        log_warning "Ollama container not ready; pull models later with:"
+        log_info "  docker exec ollama ollama pull mistral:7b"
+        return 0
+    fi
+
+    for model in $models; do
+        if docker exec ollama ollama list 2>/dev/null | grep -q "$model"; then
+            log_success "Model already present: $model"
+        else
+            log_progress "Pulling $model into container (this may take a while)..."
+            docker exec ollama ollama pull "$model" 2>&1 | tail -1 || \
+                log_warning "Failed to pull $model (you can retry later)"
+        fi
+    done
+    log_success "Model setup complete"
 }
 
 ###############################################################################
@@ -1310,6 +1304,9 @@ start_services() {
 
     log_progress "Checking service status..."
     docker compose ps || true
+
+    # Pull the selected models into the Ollama container
+    pull_models_into_container
 
     log_success "Services started"
 }
