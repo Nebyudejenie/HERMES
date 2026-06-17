@@ -865,8 +865,11 @@ services:
     networks:
       - hermis-internal
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Host 9000/9001 are commonly taken (Portainer/Cockpit/etc); publish
+      # MinIO on 9900/9901 to avoid "port is already allocated". Container
+      # ports stay 9000/9001 so Traefik routing and healthchecks are unchanged.
+      - "9900:9000"
+      - "9901:9001"
     command: minio server /minio_data --console-address :9001
     labels:
       - "traefik.enable=true"
