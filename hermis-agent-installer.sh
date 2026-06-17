@@ -1294,6 +1294,22 @@ start_services() {
         docker rm -f "$c" 2>/dev/null || true
     done
 
+    # Robust port sweep: force-remove ANY container still publishing a host
+    # port this stack needs (catches leftovers from older runs / other
+    # projects that name-based cleanup misses).
+    log_progress "Freeing required host ports..."
+    for port in 80 443 6333 8081 9100 11434 9900 9901; do
+        local holders
+        holders=$(docker ps -q --filter "publish=${port}" 2>/dev/null)
+        if [ -n "$holders" ]; then
+            log_warning "Port ${port} held by a container; removing it"
+            docker rm -f $holders 2>/dev/null || true
+        elif ss -ltn 2>/dev/null | grep -q ":${port} "; then
+            log_warning "Port ${port} held by a host process (not Docker)."
+            log_info "  Identify it with: ss -ltnp | grep ':${port} '"
+        fi
+    done
+
     log_progress "Starting Docker Compose services..."
     docker compose up -d --remove-orphans || {
         log_error "Failed to start services"
