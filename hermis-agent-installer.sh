@@ -679,7 +679,6 @@ services:
       - TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=false
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ${HERMIS_ROOT}/config/traefik/traefik.yml:/traefik.yml:ro
       - ${HERMIS_ROOT}/data/traefik:/traefik
       - ${HERMIS_ROOT}/config/ssl:/ssl:ro
     networks:
@@ -929,7 +928,6 @@ services:
       GF_SECURITY_SECRET_KEY: "${GRAFANA_SECRET_KEY}"
     volumes:
       - ${HERMIS_ROOT}/data/grafana:/var/lib/grafana
-      - ${HERMIS_ROOT}/config/grafana:/etc/grafana
     networks:
       - hermis-monitoring
       - hermis-internal
@@ -1079,6 +1077,99 @@ networks:
 DOCKERCOMPOSE_EOF
 
     log_success "Docker Compose stack created"
+}
+
+###############################################################################
+# SERVICE CONFIG FILES
+###############################################################################
+
+create_service_configs() {
+    log_section "CREATING SERVICE CONFIG FILES"
+
+    # Config dirs that compose mounts (must exist as dirs with real files,
+    # otherwise Docker bind-mounts create empty dirs and services crash-loop)
+    mkdir -p "${HERMIS_ROOT}"/config/{prometheus,loki,promtail,ssl}
+
+    log_progress "Writing prometheus.yml..."
+    cat > "${HERMIS_ROOT}/config/prometheus/prometheus.yml" << 'PROM_EOF'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+  - job_name: traefik
+    static_configs:
+      - targets: ["traefik:8080"]
+PROM_EOF
+
+    log_progress "Writing loki-config.yml..."
+    cat > "${HERMIS_ROOT}/config/loki/loki-config.yml" << 'LOKI_EOF'
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+LOKI_EOF
+
+    log_progress "Writing promtail-config.yml..."
+    cat > "${HERMIS_ROOT}/config/promtail/promtail-config.yml" << 'PROMTAIL_EOF'
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+      - targets: ["localhost"]
+        labels:
+          job: varlogs
+          __path__: /var/log/*log
+PROMTAIL_EOF
+
+    log_progress "Fixing data directory ownership for non-root containers..."
+    # prometheus/grafana/loki run as user "1000"; their data dirs were created
+    # root:root 750 and would be unwritable -> crash. Hand them to uid 1000.
+    mkdir -p "${HERMIS_ROOT}"/data/{prometheus,grafana,loki,traefik}
+    chown -R 1000:1000 "${HERMIS_ROOT}"/data/{prometheus,grafana,loki} 2>/dev/null || true
+    chmod -R 755 "${HERMIS_ROOT}"/config/{prometheus,loki,promtail} 2>/dev/null || true
+
+    log_success "Service config files created"
 }
 
 ###############################################################################
@@ -1350,6 +1441,7 @@ main() {
     create_directory_structure
     install_ollama
     create_docker_compose
+    create_service_configs
     create_env_files
 
     # Attempt to start services (non-fatal if K3s is available as alternative)
