@@ -1067,18 +1067,15 @@ services:
       retries: 3
 
 networks:
+  # Custom bridge names are intentionally omitted: Linux interface names are
+  # capped at 15 chars, so "br-hermis-internal" (18) made Docker fail with
+  # "numerical result out of range". Let Docker auto-name the bridges.
   hermis-internal:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: br-hermis-internal
   hermis-ai:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: br-hermis-ai
   hermis-monitoring:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: br-hermis-monitoring
 DOCKERCOMPOSE_EOF
 
     log_success "Docker Compose stack created"
