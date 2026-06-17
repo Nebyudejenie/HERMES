@@ -1010,31 +1010,26 @@ services:
     image: quay.io/keycloak/keycloak:latest
     container_name: keycloak
     restart: unless-stopped
+    # 'start-dev' is required; without a command the image just prints help
+    # and exits (restart loop). dev-file uses a self-contained H2 database so
+    # Keycloak doesn't need a pre-created Postgres DB.
+    command: start-dev
     environment:
+      KC_DB: dev-file
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD}"
       KEYCLOAK_ADMIN: "${KEYCLOAK_ADMIN}"
       KEYCLOAK_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD}"
-      KC_DB: postgres
-      KC_DB_URL: "jdbc:postgresql://postgres:5432/keycloak"
-      KC_DB_USERNAME: "${POSTGRES_USER}"
-      KC_DB_PASSWORD: "${POSTGRES_PASSWORD}"
-      KC_HOSTNAME: keycloak.localhost
       KC_PROXY: edge
+      KC_HTTP_ENABLED: "true"
     volumes:
       - ${HERMIS_ROOT}/data/keycloak:/opt/keycloak/data
     networks:
       - hermis-internal
-    depends_on:
-      postgres:
-        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.keycloak.rule=Host(`keycloak.localhost`)"
       - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 
   # HashiCorp Vault - Secrets Management
   vault:
