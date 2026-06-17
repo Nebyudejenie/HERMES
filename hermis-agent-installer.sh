@@ -151,29 +151,38 @@ setup_system() {
     log_section "SYSTEM SETUP AND HARDENING"
 
     log_progress "Updating package lists..."
-    apt-get update
+    apt-get update || log_warning "apt-get update reported errors (continuing)"
 
     log_progress "Upgrading packages..."
-    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y || log_warning "apt-get upgrade reported errors (continuing)"
 
-    log_progress "Installing core dependencies..."
+    # Essential packages — the installer cannot proceed without these
+    log_progress "Installing essential dependencies..."
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        curl wget git vim htop tmux tmuxinator \
-        build-essential software-properties-common apt-transport-https \
-        ca-certificates gnupg lsb-release jq yq \
-        net-tools iputils-ping dnsutils nmap \
-        unzip tar gzip zip \
-        systemd systemd-container \
-        apparmor apparmor-utils \
-        auditd audispd-plugins \
-        fail2ban ufw \
-        openssh-server openssh-client \
-        openssl cryptsetup \
-        python3 python3-pip python3-venv \
-        gcc g++ make cmake \
-        nodejs npm \
-        chrony
-    log_success "Core dependencies installed"
+        curl wget git ca-certificates gnupg lsb-release \
+        apt-transport-https jq unzip tar gzip \
+        openssl python3 python3-pip ufw chrony || {
+        log_error "Failed to install essential dependencies"
+        log_info "Check your APT repositories (on Proxmox, ensure the Debian base repos are enabled)"
+        exit 1
+    }
+    log_success "Essential dependencies installed"
+
+    # Optional packages — nice to have; install individually and skip any that are
+    # missing on this distro (e.g. yq/tmuxinator aren't in Debian main)
+    log_progress "Installing optional tools (skipping any unavailable)..."
+    local optional_pkgs=(
+        vim htop tmux net-tools iputils-ping dnsutils zip
+        build-essential software-properties-common
+        apparmor apparmor-utils auditd fail2ban
+        openssh-server python3-venv make
+    )
+    for pkg in "${optional_pkgs[@]}"; do
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" 2>/dev/null \
+            && log_success "  installed: $pkg" \
+            || log_warning "  skipped (unavailable): $pkg"
+    done
+    log_success "Dependency installation complete"
 
     log_progress "Setting timezone to ${TIMEZONE}..."
     timedatectl set-timezone "${TIMEZONE}"
