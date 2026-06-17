@@ -1197,10 +1197,20 @@ start_services() {
     fi
     log_success "Docker daemon is running"
 
+    # Clean up any leftover containers from a previous failed run so fixed
+    # ports (e.g. 6333) aren't held by orphans -> "port is already allocated"
+    log_progress "Clearing any leftover containers from previous runs..."
+    docker compose down --remove-orphans 2>/dev/null || true
+    for c in traefik portainer postgres redis ollama openwebui qdrant minio \
+             prometheus grafana loki promtail cadvisor node-exporter keycloak vault; do
+        docker rm -f "$c" 2>/dev/null || true
+    done
+
     log_progress "Starting Docker Compose services..."
-    docker compose up -d || {
+    docker compose up -d --remove-orphans || {
         log_error "Failed to start services"
         log_info "Troubleshooting: docker compose ps"
+        log_info "If a port is 'already allocated', find it with: ss -ltnp | grep <port>"
         return 1
     }
 
