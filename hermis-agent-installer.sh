@@ -186,7 +186,7 @@ setup_system() {
 
     log_progress "Setting timezone to ${TIMEZONE}..."
     timedatectl set-timezone "${TIMEZONE}"
-    systemctl restart chrony
+    systemctl restart chrony 2>/dev/null || systemctl restart chronyd 2>/dev/null || true
     log_success "Timezone configured"
 
     # Changing the hostname on a Proxmox/PVE host breaks pmxcfs (qm/pvesh stop
@@ -319,9 +319,9 @@ EOF
     log_success "Firewall configured"
 
     log_progress "Installing and configuring Fail2Ban..."
-    systemctl enable fail2ban
-    systemctl start fail2ban
-    cat > /etc/fail2ban/jail.d/hermis.conf << 'EOF'
+    if systemctl list-unit-files fail2ban.service >/dev/null 2>&1; then
+        mkdir -p /etc/fail2ban/jail.d
+        cat > /etc/fail2ban/jail.d/hermis.conf << 'EOF'
 [DEFAULT]
 bantime = 3600
 findtime = 600
@@ -344,27 +344,33 @@ maxretry = 10
 findtime = 60
 bantime = 600
 EOF
-    systemctl restart fail2ban
-    log_success "Fail2Ban configured"
+        systemctl enable fail2ban 2>/dev/null || true
+        systemctl restart fail2ban 2>/dev/null || log_warning "fail2ban not started"
+        log_success "Fail2Ban configured"
+    else
+        log_warning "fail2ban not installed — skipping"
+    fi
 
     log_progress "Configuring audit daemon..."
-    systemctl enable auditd
-    systemctl start auditd
-    # Remove existing rules if they exist, then add new ones
-    auditctl -W /opt/hermis -p wa -k hermis_changes 2>/dev/null || true
-    auditctl -W /etc/docker -p wa -k docker_config 2>/dev/null || true
-    # Add new audit rules (ignore if already exist)
-    auditctl -w /opt/hermis -p wa -k hermis_changes 2>/dev/null || true
-    auditctl -w /etc/docker -p wa -k docker_config 2>/dev/null || true
-    log_success "Audit daemon configured"
+    if systemctl list-unit-files auditd.service >/dev/null 2>&1; then
+        systemctl enable auditd 2>/dev/null || true
+        systemctl start auditd 2>/dev/null || true
+        auditctl -W /opt/hermis -p wa -k hermis_changes 2>/dev/null || true
+        auditctl -W /etc/docker -p wa -k docker_config 2>/dev/null || true
+        auditctl -w /opt/hermis -p wa -k hermis_changes 2>/dev/null || true
+        auditctl -w /etc/docker -p wa -k docker_config 2>/dev/null || true
+        log_success "Audit daemon configured"
+    else
+        log_warning "auditd not installed — skipping"
+    fi
 
     log_progress "Configuring AppArmor..."
-    systemctl enable apparmor
-    systemctl start apparmor
-    log_success "AppArmor enabled"
+    systemctl enable apparmor 2>/dev/null || true
+    systemctl start apparmor 2>/dev/null || true
+    log_success "AppArmor checked"
 
     log_progress "Configuring automatic security updates..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades
+    DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades 2>/dev/null || log_warning "unattended-upgrades not installed"
     cat > /etc/apt/apt.conf.d/50unattended-upgrades << 'EOF'
 Unattended-Upgrade::Allowed-Origins {
     "${distro_id}:${distro_codename}";
@@ -378,8 +384,8 @@ Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 Unattended-Upgrade::Remove-Unused-Boot-Grub-Packages "true";
 Unattended-Upgrade::Mail "root";
 EOF
-    systemctl enable unattended-upgrades
-    systemctl start unattended-upgrades
+    systemctl enable unattended-upgrades 2>/dev/null || true
+    systemctl start unattended-upgrades 2>/dev/null || true
     log_success "Automatic security updates configured"
 }
 
@@ -411,8 +417,10 @@ setup_docker() {
     if command -v docker &> /dev/null; then
         log_success "Docker binary found"
 
-        # Check if docker.service exists in systemd
-        if [ ! -f /etc/systemd/system/docker.service ]; then
+        # Only recreate the unit if it doesn't exist ANYWHERE. On Ubuntu the
+        # vendor unit is /usr/lib/systemd/system/docker.service, so checking
+        # only /etc would wrongly recreate it every run (and expose TCP 2375).
+        if ! systemctl cat docker.service > /dev/null 2>&1; then
             log_warning "Docker binary exists but systemd service missing"
             log_progress "Recreating Docker systemd service..."
 
@@ -424,8 +432,10 @@ Description=Docker Socket
 Documentation=https://docs.docker.com
 
 [Socket]
-ListenStream=127.0.0.1:2375
 ListenStream=/var/run/docker.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=docker
 Accept=false
 
 [Install]
