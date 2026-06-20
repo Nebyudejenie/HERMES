@@ -609,15 +609,22 @@ install_ollama() {
 
     # Decide which models the Ollama CONTAINER should pull after it starts.
     # Consumed by pull_models_into_container() in start_services.
-    if [ "${MINIMAL_INSTALL:-false}" = "true" ]; then
-        export HERMIS_MODELS="mistral:7b nomic-embed-text"
-        log_info "Minimal model set selected (~5 GB): ${HERMIS_MODELS}"
+    # Override anytime:  HERMIS_MODELS="llama3.2:3b nomic-embed-text" bash installer
+    #
+    # Defaults favor CPU-only hosts (no GPU): a 3B chat model stays responsive
+    # on laptop-class CPUs, while 7B+ is added only on larger installs.
+    if [ -n "${HERMIS_MODELS:-}" ]; then
+        export HERMIS_MODELS
+        log_info "Using custom model set: ${HERMIS_MODELS}"
+    elif [ "${MINIMAL_INSTALL:-false}" = "true" ]; then
+        export HERMIS_MODELS="llama3.2:3b nomic-embed-text"
+        log_info "Minimal model set selected (CPU-friendly, ~3.5 GB): ${HERMIS_MODELS}"
     elif [ "${COMPACT_INSTALL:-false}" = "true" ]; then
-        export HERMIS_MODELS="mistral:7b neural-chat nomic-embed-text"
-        log_info "Compact model set selected (~10-15 GB): ${HERMIS_MODELS}"
+        export HERMIS_MODELS="llama3.2:3b mistral:7b nomic-embed-text"
+        log_info "Compact model set selected (~8 GB): ${HERMIS_MODELS}"
     else
-        export HERMIS_MODELS="llama3 mistral:7b codellama nomic-embed-text"
-        log_info "Full model set selected (~25-30 GB): ${HERMIS_MODELS}"
+        export HERMIS_MODELS="llama3.2:3b llama3:8b mistral:7b nomic-embed-text"
+        log_info "Full model set selected (~20 GB): ${HERMIS_MODELS}"
     fi
 
     log_success "Ollama will run as a container; models pull after startup"
@@ -1063,6 +1070,21 @@ services:
       timeout: 5s
       retries: 3
 
+  # Autoheal - self-healing: restarts any container reported 'unhealthy'
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: all      # watch every container with a healthcheck
+      AUTOHEAL_INTERVAL: "15"            # check every 15s
+      AUTOHEAL_START_PERIOD: "120"       # grace period before acting
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hermis-internal
+
 networks:
   # Custom bridge names are intentionally omitted: Linux interface names are
   # capped at 15 chars, so "br-hermis-internal" (18) made Docker fail with
@@ -1292,7 +1314,7 @@ start_services() {
     log_progress "Clearing any leftover containers from previous runs..."
     docker compose down --remove-orphans 2>/dev/null || true
     for c in traefik portainer postgres redis ollama openwebui qdrant minio \
-             prometheus grafana loki promtail cadvisor node-exporter keycloak vault; do
+             prometheus grafana loki promtail cadvisor node-exporter keycloak vault autoheal; do
         docker rm -f "$c" 2>/dev/null || true
     done
 
