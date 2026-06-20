@@ -675,6 +675,7 @@ services:
       - "443:443"
     environment:
       - TRAEFIK_API_INSECURE=true
+      - TRAEFIK_PING=true
       - TRAEFIK_METRICS_PROMETHEUS=true
       - TRAEFIK_ENTRYPOINTS_WEB_ADDRESS=:80
       - TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS=:443
@@ -807,7 +808,7 @@ services:
       - "traefik.http.routers.ollama.rule=Host(`ollama.localhost`)"
       - "traefik.http.services.ollama.loadbalancer.server.port=11434"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -855,11 +856,8 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.qdrant.rule=Host(`qdrant.localhost`)"
       - "traefik.http.services.qdrant.loadbalancer.server.port=6333"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    # No healthcheck: the qdrant image ships no curl/wget/shell tools, so any
+    # in-container probe would falsely report 'unhealthy'.
 
   # MinIO - S3-compatible Object Storage
   minio:
@@ -915,7 +913,7 @@ services:
       - "traefik.http.routers.prometheus.rule=Host(`prometheus.localhost`)"
       - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9090/-/healthy"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -960,7 +958,7 @@ services:
       - hermis-monitoring
     command: -config.file=/etc/loki/loki-config.yml
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3100/ready"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -1060,7 +1058,7 @@ services:
       - "traefik.http.routers.vault.rule=Host(`vault.localhost`)"
       - "traefik.http.services.vault.loadbalancer.server.port=8200"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8200/v1/sys/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8200/v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -24,27 +24,36 @@
 
 ## 🎯 Quick Start
 
-### 30-Second Installation (Docker Compose)
+### Recommended: install inside a dedicated VM
+
+Hermis runs **inside an Ubuntu Server VM**, never directly on a hypervisor host.
+A provisioner builds the VM on either Proxmox or KVM/libvirt:
 
 ```bash
-# Clone or download the installer
-cd /tmp
-wget https://github.com/hermis-ai/hermis-agent/releases/download/v1.0.0/hermis-agent-installer.sh
+# On the physical host (Proxmox OR KVM/libvirt) — provisioner auto-detects:
+git clone https://github.com/Nebyudejenie/HERMES.git && cd HERMES
+sudo bash provision-hermis-vm.sh --dry-run     # preview, changes nothing
+sudo bash provision-hermis-vm.sh               # create the VM (16GB/4cpu/200GB)
 
-# Run installer
-sudo chmod +x hermis-agent-installer.sh
-sudo ./hermis-agent-installer.sh
+# Install Ubuntu Server via the console (enable OpenSSH), then INSIDE the VM:
+git clone https://github.com/Nebyudejenie/HERMES.git && cd HERMES
+sudo bash hermis-agent-installer.sh
+```
 
-# Done! Access your platform
-open http://localhost:8000
+### Already inside an Ubuntu Server? Just install
+
+```bash
+git clone https://github.com/Nebyudejenie/HERMES.git && cd HERMES
+sudo bash hermis-agent-installer.sh
 ```
 
 **What you get:**
-- ✅ Full AI platform in 10 minutes
-- ✅ 8+ pre-configured services
+- ✅ 16 pre-configured services (Ollama, Qdrant, Postgres, Redis, MinIO,
+  Keycloak, Vault, Traefik, Prometheus/Grafana/Loki, Portainer, OpenWebUI, …)
+- ✅ Local LLM inference + RAG
 - ✅ Monitoring & observability
-- ✅ Security hardening
-- ✅ Automated backups
+- ✅ Security hardening + automated backups
+- ✅ Runs on Proxmox or KVM/libvirt — identical inside the VM
 
 ---
 
