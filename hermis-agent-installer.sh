@@ -189,10 +189,19 @@ setup_system() {
     systemctl restart chrony
     log_success "Timezone configured"
 
-    log_progress "Setting hostname to ${HOSTNAME_TARGET}..."
-    hostnamectl set-hostname "${HOSTNAME_TARGET}"
-    sed -i "s/^127.0.1.1.*/127.0.1.1\t${HOSTNAME_TARGET}/" /etc/hosts
-    log_success "Hostname configured"
+    # Changing the hostname on a Proxmox/PVE host breaks pmxcfs (qm/pvesh stop
+    # working). Never touch the hostname on such hosts, and make it opt-out
+    # everywhere else. In a dedicated VM this is safe and runs by default.
+    if [ -d /etc/pve ]; then
+        log_warning "Proxmox host detected (/etc/pve) — NOT changing hostname"
+    elif [ "${HERMIS_SET_HOSTNAME:-true}" = "true" ]; then
+        log_progress "Setting hostname to ${HOSTNAME_TARGET}..."
+        hostnamectl set-hostname "${HOSTNAME_TARGET}" || log_warning "Could not set hostname"
+        sed -i "s/^127.0.1.1.*/127.0.1.1\t${HOSTNAME_TARGET}/" /etc/hosts 2>/dev/null || true
+        log_success "Hostname configured"
+    else
+        log_info "Skipping hostname change (HERMIS_SET_HOSTNAME=false)"
+    fi
 
     log_progress "Configuring swap..."
     if [ ! -f /swapfile ]; then
