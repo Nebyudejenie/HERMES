@@ -263,33 +263,43 @@ harden_security() {
     log_section "SECURITY HARDENING"
 
     log_progress "Configuring SSH hardening..."
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
-    cat >> /etc/ssh/sshd_config << 'EOF'
+    # Lockout-safe: only disable password auth if an SSH key is already
+    # installed for a login user; otherwise keep passwords ON. Written as a
+    # drop-in (idempotent) so we never mangle the main sshd_config.
+    local pwauth="yes"
+    if grep -rqs "^ssh-" /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys 2>/dev/null; then
+        pwauth="no"
+        log_info "SSH key found -> disabling password authentication"
+    else
+        log_warning "No SSH key found -> keeping password auth ENABLED (prevents lockout)"
+    fi
 
-# Hermis Agent SSH Hardening
-Port 22
-AddressFamily inet
-Protocol 2
+    mkdir -p /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/99-hermis.conf << EOF
+# Hermis Agent SSH Hardening (drop-in)
 PermitRootLogin no
 StrictModes yes
-MaxAuthTries 3
-MaxSessions 10
+MaxAuthTries 4
 PubkeyAuthentication yes
-PasswordAuthentication no
+PasswordAuthentication ${pwauth}
 PermitEmptyPasswords no
 X11Forwarding no
-PrintMotd no
-AcceptEnv LANG LC_*
-Subsystem sftp /usr/lib/openssh/sftp-server
 ClientAliveInterval 300
 ClientAliveCountMax 2
-TCPKeepAlive yes
-Compression no
-GatewayPorts no
-UsePAM yes
 EOF
-    systemctl restart sshd
-    log_success "SSH hardened"
+
+    # Validate before applying; revert the drop-in if the config is bad.
+    if sshd -t 2>/dev/null; then
+        # Ubuntu's unit is 'ssh'; some distros use 'sshd'. Non-fatal either way.
+        systemctl restart ssh 2>/dev/null \
+            || systemctl restart sshd 2>/dev/null \
+            || systemctl reload ssh 2>/dev/null \
+            || log_warning "Could not restart SSH service (continuing)"
+        log_success "SSH hardened (password auth: ${pwauth})"
+    else
+        log_warning "sshd config test failed — removing Hermis SSH drop-in"
+        rm -f /etc/ssh/sshd_config.d/99-hermis.conf
+    fi
 
     log_progress "Configuring firewall (UFW)..."
     ufw --force enable
