@@ -497,34 +497,19 @@ DOCKER_SERVICE
 
     log_progress "Configuring Docker daemon..."
     mkdir -p /etc/docker
+    # Minimal, modern-Docker-safe config. Deliberately omits options that newer
+    # dockerd rejects and that caused start failures:
+    #   - storage-opts overlay2.override_kernel_check (removed in Docker 23+)
+    #   - seccomp-profile pointing at a possibly-missing file (use built-in default)
     cat > /etc/docker/daemon.json << 'EOF'
 {
-  "debug": false,
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "100m",
-    "max-file": "10",
-    "labels": "hermis=true"
+    "max-file": "5"
   },
   "storage-driver": "overlay2",
-  "storage-opts": [
-    "overlay2.override_kernel_check=true"
-  ],
-  "insecure-registries": [],
-  "registry-mirrors": [],
   "live-restore": true,
-  "userland-proxy": true,
-  "default-cgroupns-mode": "host",
-  "default-runtime": "runc",
-  "runtimes": {
-    "runc": {
-      "path": "runc"
-    }
-  },
-  "seccomp-profile": "/etc/docker/seccomp.json",
-  "icc": false,
-  "ip-forward": true,
-  "ip-masq": true,
   "default-address-pools": [
     {
       "base": "172.18.0.0/16",
@@ -533,16 +518,18 @@ DOCKER_SERVICE
   ],
   "max-concurrent-downloads": 5,
   "max-concurrent-uploads": 5,
-  "metrics-addr": "127.0.0.1:9323",
-  "experimental": false,
   "features": {
     "buildkit": true
   }
 }
 EOF
 
-    log_progress "Configuring Docker seccomp profile..."
-    curl -sSL https://raw.githubusercontent.com/moby/moby/master/profiles/seccomp/default.json | tee /etc/docker/seccomp.json > /dev/null 2>&1 || true
+    # Validate the daemon config; if jq is present and it's invalid, drop it
+    # rather than let dockerd fail to start.
+    if command -v jq >/dev/null 2>&1 && ! jq empty /etc/docker/daemon.json >/dev/null 2>&1; then
+        log_warning "Generated daemon.json invalid — removing it (Docker defaults are fine)"
+        rm -f /etc/docker/daemon.json
+    fi
 
     log_progress "Enabling Docker service..."
     systemctl enable docker 2>/dev/null || true
