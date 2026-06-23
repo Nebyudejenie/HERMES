@@ -1399,8 +1399,26 @@ BACKUP_EOF
 
     log_progress "Setting up backup cron job..."
     echo "0 2 * * * root ${HERMIS_ROOT}/scripts/backup/daily-backup.sh" | tee /etc/cron.d/hermis-backup > /dev/null 2>&1 || true
-
     log_success "Backup automation configured"
+
+    # Let the invoking (non-root) user run docker without sudo.
+    if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+        log_progress "Adding ${SUDO_USER} to the docker group..."
+        usermod -aG docker "${SUDO_USER}" 2>/dev/null || true
+        log_info "Log out/in (or run 'newgrp docker') for it to take effect"
+    fi
+
+    # Install a 'hermis' command -> control script, usable from anywhere.
+    log_progress "Installing 'hermis' command..."
+    local ctl="${HERMIS_ROOT}/hermis-control.sh"
+    cp "$(dirname "$0")/hermis-control.sh" "$ctl" 2>/dev/null || true
+    cat > /usr/local/bin/hermis << HCMD
+#!/bin/bash
+# Hermis launcher -> control script
+exec sudo bash ${ctl} "\$@"
+HCMD
+    chmod +x /usr/local/bin/hermis 2>/dev/null || true
+    log_success "'hermis' command installed (try: hermis status)"
 }
 
 ###############################################################################
