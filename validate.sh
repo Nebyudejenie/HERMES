@@ -35,28 +35,41 @@ if [ -z "$UNHEALTHY" ]; then pass "No unhealthy containers"; else warn "Unhealth
 # 4. autoheal present
 docker ps --format '{{.Names}}' | grep -q '^autoheal$' && pass "Self-healing (autoheal) active" || warn "autoheal not running"
 
-# 5. Core endpoints (from the host VM)
+# 5a. Host-published endpoints (these DO bind the VM's localhost)
 check_http(){ # name url
   if curl -fsS --max-time 5 "$2" >/dev/null 2>&1; then pass "$1 reachable ($2)"; else warn "$1 not reachable yet ($2)"; fi
 }
-check_http "Ollama"     "http://localhost:11434/api/tags"
-check_http "Qdrant"     "http://localhost:6333/readyz"
-check_http "Grafana"    "http://localhost:3000/api/health"
-check_http "Prometheus" "http://localhost:9090/-/healthy"
-check_http "Portainer"  "http://localhost:9000/api/status"
+check_http "Ollama"  "http://localhost:11434/api/tags"
+check_http "Qdrant"  "http://localhost:6333/readyz"
+
+# 5b. Traefik-routed services bind only inside the docker network (not the VM
+# localhost), so check their CONTAINER health/running state instead of curling.
+check_container(){ # name
+  local st; st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null)
+  case "$st" in
+    healthy|running) pass "$1: $st" ;;
+    starting)        warn "$1: still warming up" ;;
+    "" )             warn "$1: not found" ;;
+    *)               warn "$1: $st (autoheal will retry)" ;;
+  esac
+}
+for c in grafana prometheus portainer openwebui keycloak vault traefik minio loki; do
+  check_container "$c"
+done
 
 # 6. Models present
 MODELS=$(docker exec ollama ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')
 if [ -n "$MODELS" ]; then pass "Models loaded: $MODELS"; else fail "No Ollama models present"; fi
 
 # 7. OpenAI-compatible API (Ollama native /v1) answers
-if curl -fsS --max-time 90 http://localhost:11434/v1/chat/completions \
+# First load on a CPU-only host can take a while; allow up to 240s.
+if curl -fsS --max-time 240 http://localhost:11434/v1/chat/completions \
      -H 'Content-Type: application/json' \
      -d "{\"model\":\"$(echo "$MODELS" | awk '{print $1}')\",\"messages\":[{\"role\":\"user\",\"content\":\"reply OK\"}],\"max_tokens\":5}" \
      2>/dev/null | grep -qi '"content"'; then
   pass "OpenAI-compatible API answered a real prompt"
 else
-  warn "AI prompt did not answer within 90s (model may still be warming on CPU)"
+  warn "AI prompt did not answer within 240s (first CPU load is slow; try a manual prompt)"
 fi
 
 echo "=================================================="
